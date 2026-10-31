@@ -244,6 +244,7 @@ pub fn build_router(ctx: Arc<PipelineContext>) -> Router {
         .route("/api/people/dedup/auto", post(handle_auto_dedup_people))
         .route("/api/people/merge", post(handle_direct_merge_people))
         .route("/api/claims/:id/feedback", post(handle_claim_feedback))
+        .route("/api/claims/:id/redact", post(handle_claim_redact))
         .route("/api/notifications", get(handle_get_notifications))
         .route("/api/people/:id", get(handle_get_person).put(handle_update_person).delete(handle_delete_person))
         .route("/api/people/:id/dossier", get(handle_get_person_dossier))
@@ -3771,6 +3772,49 @@ async fn handle_direct_merge_people(
         ).into_response();
     }
     Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ClaimRedactRequest {
+    pub video_id: String,
+    pub text_bg: String,
+    pub notes: Option<String>,
+}
+
+async fn handle_claim_redact(
+    State(ctx): State<Arc<PipelineContext>>,
+    Path(claim_id): Path<i64>,
+    Json(body): Json<ClaimRedactRequest>,
+) -> Response {
+    let text = body.text_bg.trim().to_string();
+    if text.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "text_bg must not be empty" })),
+        ).into_response();
+    }
+    if let Err(e) = ctx.db.update_claim_text(claim_id, &text).await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e.to_string() })),
+        ).into_response();
+    }
+    if let Some(notes) = body.notes.as_deref().filter(|n| !n.trim().is_empty()) {
+        let _ = ctx.db.save_claim_feedback(claim_id, &body.video_id, "edited", None, Some(notes)).await;
+    }
+    let run_ctx = Arc::clone(&ctx);
+    let vid = body.video_id.clone();
+    tokio::spawn(async move {
+        let _ = run_ctx.verify_claim_with_retrieval(&vid, claim_id).await;
+        if let Ok(Some(v)) = run_ctx.db.get_video(&vid).await {
+            run_ctx.emit(CoreEvent::VideoUpdated {
+                video_id: vid,
+                state: v.state,
+                lane: v.lane,
+            });
+        }
+    });
+    Json(serde_json::json!({ "ok": true, "claim_id": claim_id })).into_response()
 }
 
 async fn handle_claim_feedback(

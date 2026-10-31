@@ -931,6 +931,15 @@ impl Database {
             .collect())
     }
 
+    pub async fn update_claim_text(&self, claim_id: i64, text_bg: &str) -> Result<()> {
+        sqlx::query("UPDATE claims SET text_bg = ?2, verdict = NULL, reasoning_bg = NULL WHERE id = ?1")
+            .bind(claim_id)
+            .bind(text_bg)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn update_claim_verification(
         &self,
         claim_id: i64,
@@ -1826,6 +1835,21 @@ impl Database {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    pub async fn latest_claim_notes(&self, claim_id: i64) -> Result<Option<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT notes FROM claim_verification_feedback WHERE claim_id = ?1 AND rating = 'edited' AND notes IS NOT NULL AND TRIM(notes) <> '' ORDER BY id DESC LIMIT 5",
+        )
+        .bind(claim_id)
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.is_empty() {
+            return Ok(None);
+        }
+        let mut notes: Vec<String> = rows.into_iter().map(|r| r.0).collect();
+        notes.reverse();
+        Ok(Some(notes.join("\n")))
     }
 
     pub async fn split_compound_person(&self, source_id: i64, target_names: &[String]) -> Result<Vec<i64>> {

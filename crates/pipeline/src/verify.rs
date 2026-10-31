@@ -693,12 +693,18 @@ impl PipelineContext {
                         None
                     }
                 });
-                let user_prompt = build_verify_user_prompt(
+                let mut user_prompt = build_verify_user_prompt(
                     &claim,
                     &top_passages,
                     video.posted_at.as_deref(),
                     aegis_context.as_deref(),
                 );
+                if let Ok(Some(notes)) = self.db.latest_claim_notes(claim.id).await {
+                    user_prompt.push_str(&format!(
+                        "\n\nREVIEWER_NOTES (насоки от потребителя; не са доказателство, не цитирай като източник):\n{}",
+                        notes.trim()
+                    ));
+                }
                 let runner = LlmChainRunner::from_role("fact_verification", &self.paths, &cfg, &self.db).await;
                 let llm_req = LlmJsonRequest {
                     system_prompt,
@@ -984,6 +990,62 @@ impl PipelineContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn redacting_claim_resets_verdict_and_exposes_latest_notes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = leadfinder_core::Database::connect(&dir.path().join("redact.db")).await.unwrap();
+        let vref = leadfinder_core::VideoRef {
+            id: "vid_redact".to_string(),
+            url: "https://www.tiktok.com/@bg/video/7100000000000000002".to_string(),
+            creator_id: Some("bg".to_string()),
+            creator_handle: Some("bg".to_string()),
+            creator_display_name: None,
+            creator_follower_count: None,
+            creator_region: Some("BG".to_string()),
+            caption: None,
+            hashtags: vec![],
+            posted_at: None,
+            views: None,
+            likes: None,
+            shares: None,
+            comments: None,
+            duration_s: None,
+            sound_title: None,
+            subtitle_urls: vec![],
+            discovered_via: "paste".to_string(),
+        };
+        db.upsert_video_discovered(&vref, 0).await.unwrap();
+        let claim = Claim {
+            id: 0,
+            video_id: "vid_redact".to_string(),
+            text_bg: "Стар текст".to_string(),
+            claim_type: "factual".to_string(),
+            speaker: None,
+            attribution: vec![],
+            start_ms: None,
+            end_ms: None,
+            checkworthiness: None,
+            verdict: None,
+            label: None,
+            reasoning_bg: None,
+            evidence_strength: None,
+            verified_at: None,
+            cluster_id: None,
+        };
+        let saved = db.replace_claims_for_video("vid_redact", &[claim]).await.unwrap();
+        let id = saved[0].id;
+        db.update_claim_verification(id, "CONTRADICTED", "false_claim", "стар мотив", 0.9, &[]).await.unwrap();
+
+        db.update_claim_text(id, "Нов текст").await.unwrap();
+        db.save_claim_feedback(id, "vid_redact", "edited", None, Some("провери регистъра")).await.unwrap();
+
+        let after = db.get_claims_for_video("vid_redact").await.unwrap();
+        assert_eq!(after[0].text_bg, "Нов текст");
+        assert!(after[0].verdict.is_none());
+        assert!(after[0].reasoning_bg.is_none());
+        assert_eq!(db.latest_claim_notes(id).await.unwrap().as_deref(), Some("провери регистъра"));
+    }
 
     #[test]
     fn distill_claim_keywords_merges_spaced_numbers() {

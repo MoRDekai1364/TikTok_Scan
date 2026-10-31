@@ -16,6 +16,7 @@
     openExternalUrl,
     queryGoogleAi,
     reassignVideoPerson,
+    redactClaim,
     removePersonFromVideo,
     researchPerson,
     retranscribeVideo,
@@ -640,6 +641,59 @@
         suggested_verdict: suggestedVerdict,
       });
     } catch {
+    }
+  }
+
+  let redactingClaimId = $state<number | null>(null);
+  let redactText = $state('');
+  let redactNotes = $state('');
+  let isRedacting = $state(false);
+
+  function startRedact(claim: { id: number; text_bg: string; reasoning_bg?: string | null }) {
+    redactingClaimId = claim.id;
+    redactText = claim.text_bg;
+    redactNotes = '';
+  }
+
+  let stmtEdit = $state<{ claimId: number; key: string; original: string; text: string; note: string } | null>(null);
+
+  function startStmtEdit(claimId: number, idx: number, original: string, detailText: string) {
+    stmtEdit = { claimId, key: `${claimId}-${idx}`, original, text: original, note: '' };
+  }
+
+  async function submitStmtEdit(claimText: string) {
+    if (!detail || !stmtEdit || !stmtEdit.text.trim()) return;
+    isRedacting = true;
+    const e = stmtEdit;
+    const notes =
+      `Изявление: "${e.original}" -> коригирано от потребителя: "${e.text.trim()}".` +
+      (e.note.trim() ? ` Бележка: ${e.note.trim()}` : '');
+    try {
+      await redactClaim(e.claimId, detail.video.id, claimText, notes);
+      stmtEdit = null;
+      setTimeout(async () => {
+        const fresh = await fetchVideoDetail(videoId);
+        if (fresh) detail = fresh;
+      }, 4000);
+    } catch {
+    } finally {
+      isRedacting = false;
+    }
+  }
+
+  async function submitRedact() {
+    if (!detail || redactingClaimId === null || !redactText.trim()) return;
+    isRedacting = true;
+    try {
+      await redactClaim(redactingClaimId, detail.video.id, redactText, redactNotes);
+      redactingClaimId = null;
+      setTimeout(async () => {
+        const fresh = await fetchVideoDetail(videoId);
+        if (fresh) detail = fresh;
+      }, 4000);
+    } catch {
+    } finally {
+      isRedacting = false;
     }
   }
 
@@ -2501,6 +2555,28 @@
                             {/if}
                           </div>
                           <div class="stmt-detail">{stmtItem.detail}</div>
+                          {#if stmtEdit && stmtEdit.key === `${claim.id}-${sIdx}`}
+                            <div class="claim-redact-box">
+                              <textarea rows="2" bind:value={stmtEdit.text}></textarea>
+                              <textarea
+                                rows="2"
+                                bind:value={stmtEdit.note}
+                                placeholder={currentLang === 'bg' ? 'Защо е грешно / какво да се провери (по желание)' : 'Why it is wrong / what to check (optional)'}
+                              ></textarea>
+                              <div class="redact-actions">
+                                <button class="btn-feedback correct" disabled={isRedacting} onclick={() => submitStmtEdit(claim.text_bg)}>
+                                  🔁 {currentLang === 'bg' ? 'Запази и провери отново' : 'Save & re-verify'}
+                                </button>
+                                <button class="btn-feedback" onclick={() => (stmtEdit = null)}>
+                                  {currentLang === 'bg' ? 'Отказ' : 'Cancel'}
+                                </button>
+                              </div>
+                            </div>
+                          {:else}
+                            <button class="btn-feedback" onclick={() => startStmtEdit(claim.id, sIdx, stmtItem.statement || stmtItem.detail, stmtItem.detail)}>
+                              ✏️ {currentLang === 'bg' ? 'Редактирай изявлението' : 'Edit statement'}
+                            </button>
+                          {/if}
                         </div>
                       {/each}
                     </div>
@@ -2523,6 +2599,25 @@
                     </div>
                   {/if}
                 </div>
+              {/if}
+
+              {#if redactingClaimId === claim.id}
+                <div class="claim-redact-box">
+                  <textarea rows="3" bind:value={redactText} placeholder={currentLang === 'bg' ? 'Коригирано твърдение' : 'Corrected claim'}></textarea>
+                  <textarea rows="2" bind:value={redactNotes} placeholder={currentLang === 'bg' ? 'Бележки към опровергаването / обобщението (по желание)' : 'Notes on the refutation / summary (optional)'}></textarea>
+                  <div class="redact-actions">
+                    <button class="btn-feedback correct" disabled={isRedacting} onclick={submitRedact}>
+                      🔁 {currentLang === 'bg' ? 'Запази и провери отново' : 'Save & re-verify'}
+                    </button>
+                    <button class="btn-feedback" onclick={() => (redactingClaimId = null)}>
+                      {currentLang === 'bg' ? 'Отказ' : 'Cancel'}
+                    </button>
+                  </div>
+                </div>
+              {:else}
+                <button class="btn-feedback" onclick={() => startRedact(claim)}>
+                  ✏️ {currentLang === 'bg' ? 'Редактирай и провери отново' : 'Edit & re-verify'}
+                </button>
               {/if}
 
               <div class="claim-feedback-bar">
@@ -5595,6 +5690,7 @@
     margin-bottom: 0.3rem;
     display: -webkit-box;
     -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
     line-height: 1.35;
@@ -5871,4 +5967,7 @@
   .citation-link:hover {
     text-decoration: underline;
   }
+  .claim-redact-box { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+  .claim-redact-box textarea { width: 100%; padding: 6px; border-radius: 6px; background: var(--bg-elevated, #1e1e1e); color: inherit; border: 1px solid #444; }
+  .redact-actions { display: flex; gap: 6px; }
 </style>

@@ -530,6 +530,13 @@ export async function submitClaimFeedback(claimId: number, req: ClaimFeedbackReq
   });
 }
 
+export async function redactClaim(claimId: number, videoId: string, textBg: string, notes?: string): Promise<{ ok: boolean }> {
+  return fetchJson<{ ok: boolean }>(`/api/claims/${claimId}/redact`, {
+    method: 'POST',
+    body: JSON.stringify({ video_id: videoId, text_bg: textBg, notes }),
+  });
+}
+
 export async function fetchNotifications(): Promise<NotificationsResponse> {
   return fetchJson<NotificationsResponse>('/api/notifications');
 }

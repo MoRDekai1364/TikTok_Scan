@@ -87,3 +87,9 @@
   1. `abs_pos.saturating_sub(40)` subtracted raw byte offsets, splitting 2-byte Cyrillic characters in half.
   2. Indexing past multi-byte Bulgarian quotes (`q_start + 1` where `„` is 3 bytes in UTF-8: `E2 80 9E`) landed on an invalid interior byte boundary.
 - **Resolution**: Converted byte offsets to safe `char`-based windows (`prefix.chars().collect::<Vec<char>>()`), taking character counts (`take_count`) rather than raw bytes, and consumed opening quote characters using iterator step (`q_chars.next()`). Added unit test `test_extract_entity_pivots_cyrillic_boundary_safe`.
+
+- PowerShell reports exit code 1 for 'cargo ... 2>&1' when cargo prints Finished to stderr; judge by Finished/test result lines.
+- Release build fails with 'failed to remove file target\release\leadfinder.exe' while leadfinder.exe or leadfinder-desktop.exe runs; ask user, stop them, rebuild.
+- Svelte allows one style block per file; insert CSS before the existing closing style tag in DetailDrawer.svelte.
+- Pair -webkit-line-clamp with standard line-clamp to avoid svelte-check warnings.
+- Claim redaction: POST /api/claims/:id/redact -> update_claim_text (clears verdict) -> feedback rating 'edited' -> verify_claim_with_retrieval injects latest_claim_notes as REVIEWER_NOTES (guidance, not evidence).
